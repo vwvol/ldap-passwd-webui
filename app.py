@@ -4,13 +4,14 @@ import bottle
 from bottle import get, post, static_file, request, route, template
 from bottle import SimpleTemplate
 from configparser import ConfigParser
-from ldap3 import Connection, Server
+from ldap3 import Connection, Server, Tls
 from ldap3 import SIMPLE, SUBTREE
 from ldap3.core.exceptions import LDAPBindError, LDAPConstraintViolationResult, \
     LDAPInvalidCredentialsResult, LDAPUserNameIsMandatoryError
 import logging
 import os
 from os import environ, path
+from ssl import CERT_REQUIRED, PROTOCOL_TLSv1
 
 
 BASE_DIR = path.dirname(__file__)
@@ -34,7 +35,7 @@ def post_index():
     if form('new-password') != form('confirm-password'):
         return error("Password doesn't match the confirmation!")
 
-    if len(form('new-password')) < 8:
+    if len(form('new-password')) < 6:
         return error("Password must be at least 8 characters long!")
 
     try:
@@ -66,6 +67,29 @@ def connect_ldap(**kwargs):
     return Connection(server, raise_exceptions=True, **kwargs)
 
 
+def connect_ldaps(**kwargs):
+    t = Tls(validate=CERT_REQUIRED, \
+            version=PROTOCOL_TLSv1, \
+            ca_certs_file=CONF['ldap'].get('ca_cert'))
+    server = Server(host=CONF['ldap']['host'],
+                    port=CONF['ldap'].getint('port', None),
+                    use_ssl=CONF['ldap'].getboolean('use_ssl', False),
+                    tls=t,
+                    connect_timeout=5)
+
+    return Connection(server, raise_exceptions=True, **kwargs)
+
+
+def check_ca():
+    if CONF['ldap'].getboolean('use_ssl', False) and \
+       type(CONF['ldap'].get('ca_cert')) is unicode:
+        if os.access(CONF['ldap'].get('ca_cert'), os.R_OK):
+            return True
+        else:
+            LOG.warning('CA verification configured, but failed to open file')
+    return False
+
+
 def change_password(*args):
     try:
         if CONF['ldap'].get('type') == 'ad':
@@ -83,8 +107,15 @@ def change_password(*args):
 
 
 def change_password_ldap(username, old_pass, new_pass):
-    with connect_ldap() as c:
-        user_dn = find_user_dn(c, username)
+    if check_ca():
+        connect_ldap = connect_ldaps
+
+    if CONF['ldap'].getboolean('anon_bind', False):
+        with connect_ldap() as c:
+            user_dn = find_user_dn(c, username)
+    else:
+        user_dn = CONF['ldap']['search_filter'].replace('{uid}', username) + \
+                  ',' + CONF['ldap']['base']
 
     # Note: raises LDAPUserNameIsMandatoryError when user_dn is None.
     with connect_ldap(authentication=SIMPLE, user=user_dn, password=old_pass) as c:
