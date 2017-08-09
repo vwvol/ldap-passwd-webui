@@ -35,7 +35,7 @@ def post_index():
     if form('new-password') != form('confirm-password'):
         return error("Password doesn't match the confirmation!")
 
-    if len(form('new-password')) < 6:
+    if len(form('new-password')) < 8:
         return error("Password must be at least 8 characters long!")
 
     try:
