@@ -110,7 +110,7 @@ def change_password_ldap(username, old_pass, new_pass):
     if check_ca():
         connect_ldap = connect_ldaps
 
-    if CONF['ldap'].getboolean('anon_bind', False):
+    if CONF['ldap'].getboolean('anon_bind', True):
         with connect_ldap() as c:
             user_dn = find_user_dn(c, username)
     else:
